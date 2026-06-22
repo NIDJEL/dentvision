@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS doctor_feedback;
+DROP TABLE IF EXISTS analysis_results;
+DROP TABLE IF EXISTS analysis_jobs;
+DROP TABLE IF EXISTS analysis_models;
+DROP TABLE IF EXISTS dental_images;
+DROP TABLE IF EXISTS image_files;
+DROP TABLE IF EXISTS patients;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS roles;
