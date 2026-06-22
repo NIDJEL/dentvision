@@ -126,7 +126,6 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	defer rows.Close()
 
 	results := make([]analysisResultDTO, 0)
 
@@ -145,6 +144,7 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 			&result.Height,
 			&result.CreatedAt,
 		); err != nil {
+			rows.Close()
 			log.Println("scan analysis result:", err)
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -152,6 +152,15 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 
 		results = append(results, result)
 	}
+
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		log.Println("rows analysis results:", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	rows.Close()
 
 	if _, err := tx.Exec(
 		r.Context(),
@@ -236,6 +245,12 @@ func (a *App) GetImageAnalysis(w http.ResponseWriter, r *http.Request) {
 		}
 
 		results = append(results, result)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Println("rows analysis:", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

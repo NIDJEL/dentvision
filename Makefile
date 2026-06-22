@@ -29,3 +29,6 @@ migrate-down:
 
 migrate-force:
 	docker run --rm -v $(PWD)/$(MIGRATIONS_PATH):/migrations --network host $(MIGRATE_IMAGE) -path /migrations -database "$(MIGRATE_DATABASE_URL)" force $(version)
+
+test-backend:
+	cd backend && TEST_DATABASE_URL="$(MIGRATE_DATABASE_URL)" go test ./...
