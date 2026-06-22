@@ -25,6 +25,16 @@ func (a *App) Routes() http.Handler {
 
 	r.Get("/health", a.Health)
 
+	r.Route("/auth", func(r chi.Router) {
+		r.Post("/login", a.Login)
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Use(a.AuthMiddleware)
+
+		r.Get("/me", a.Me)
+	})
+
 	return r
 }
 
