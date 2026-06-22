@@ -30,6 +30,7 @@ func New(db *pgxpool.Pool, jwtSecret string, uploadsDir string, mlServiceURL str
 
 func (a *App) Routes() http.Handler {
 	r := chi.NewRouter()
+	r.Use(corsMiddleware)
 
 	r.Get("/health", a.Health)
 
@@ -49,11 +50,27 @@ func (a *App) Routes() http.Handler {
 		r.Post("/patients/{patientID}/images", a.UploadPatientImage)
 		r.Get("/patients/{patientID}/images", a.ListPatientImages)
 
+		r.Get("/images/{imageID}/file", a.GetImageFile)
 		r.Post("/images/{imageID}/analysis", a.RunImageAnalysis)
 		r.Get("/images/{imageID}/analysis", a.GetImageAnalysis)
 	})
 
 	return r
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *App) Start(port string) error {

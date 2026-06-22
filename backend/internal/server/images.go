@@ -99,8 +99,8 @@ func (a *App) UploadPatientImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mimeType := header.Header.Get("Content-Type")
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = mimeTypeFromImageExt(ext)
 	}
 
 	tx, err := a.db.Begin(r.Context())
@@ -249,6 +249,51 @@ func (a *App) ListPatientImages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *App) GetImageFile(w http.ResponseWriter, r *http.Request) {
+	claims, ok := currentUserClaims(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	imageID, err := strconv.ParseInt(chi.URLParam(r, "imageID"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid image id")
+		return
+	}
+
+	if !a.imageBelongsToDoctor(r, imageID, claims.UserID) {
+		writeError(w, http.StatusNotFound, "image not found")
+		return
+	}
+
+	var filePath string
+	var mimeType string
+
+	err = a.db.QueryRow(
+		r.Context(),
+		`
+		SELECT f.file_path, f.mime_type
+		FROM dental_images di
+		JOIN image_files f ON f.id = di.file_id
+		WHERE di.id = $1
+		LIMIT 1
+		`,
+		imageID,
+	).Scan(&filePath, &mimeType)
+	if err != nil {
+		log.Println("get image file:", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if mimeType != "" {
+		w.Header().Set("Content-Type", mimeType)
+	}
+
+	http.ServeFile(w, r, filePath)
+}
+
 func (a *App) patientBelongsToDoctor(r *http.Request, patientID int64, doctorID int64) bool {
 	var exists bool
 
@@ -296,4 +341,15 @@ func randomFileName(ext string) string {
 	}
 
 	return hex.EncodeToString(bytes) + ext
+}
+
+func mimeTypeFromImageExt(ext string) string {
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	default:
+		return "application/octet-stream"
+	}
 }

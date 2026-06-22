@@ -63,6 +63,23 @@ services:
     volumes:
       - ./uploads:/app/uploads:ro
 
+  frontend:
+    build:
+      context: ./frontend
+    container_name: dentvision-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+    depends_on:
+      backend:
+        condition: service_started
+
 volumes:
   postgres_data:
   pgadmin_data:

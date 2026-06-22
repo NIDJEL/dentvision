@@ -112,6 +112,7 @@ func TestDoctorMainFlow(t *testing.T) {
 	testutil.RequireStatus(t, status, http.StatusOK, body)
 
 	image := uploadTestImage(t, client, ts.URL, login.Token, patient.ID)
+	assertImageFileIsServed(t, client, ts.URL, login.Token, image.ID)
 
 	var analysis analysisResponse
 
@@ -353,4 +354,33 @@ func uploadTestImage(t *testing.T, client *http.Client, baseURL string, token st
 	}
 
 	return image
+}
+
+func assertImageFileIsServed(t *testing.T, client *http.Client, baseURL string, token string, imageID int64) {
+	t.Helper()
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		fmt.Sprintf("%s/images/%d/file", baseURL, imageID),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("new image file request: %v", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("get image file: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected image file status 200, got %d", resp.StatusCode)
+	}
+
+	if got := resp.Header.Get("Content-Type"); got != "image/png" {
+		t.Fatalf("expected image/png content type, got %q", got)
+	}
 }
