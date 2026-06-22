@@ -1,0 +1,16 @@
+.env
+
+uploads/*
+!uploads/.gitkeep
+
+backend/bin/
+backend/tmp/
+
+ml-service/.venv/
+ml-service/__pycache__/
+ml-service/*.pyc
+
+frontend/node_modules/
+frontend/dist/
+
+.DS_Store
