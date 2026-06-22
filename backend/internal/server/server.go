@@ -9,14 +9,16 @@ import (
 )
 
 type App struct {
-	db        *pgxpool.Pool
-	jwtSecret string
+	db         *pgxpool.Pool
+	jwtSecret  string
+	uploadsDir string
 }
 
-func New(db *pgxpool.Pool, jwtSecret string) *App {
+func New(db *pgxpool.Pool, jwtSecret string, uploadsDir string) *App {
 	return &App{
-		db:        db,
-		jwtSecret: jwtSecret,
+		db:         db,
+		jwtSecret:  jwtSecret,
+		uploadsDir: uploadsDir,
 	}
 }
 
@@ -33,6 +35,16 @@ func (a *App) Routes() http.Handler {
 		r.Use(a.AuthMiddleware)
 
 		r.Get("/me", a.Me)
+
+		r.Post("/patients", a.CreatePatient)
+		r.Get("/patients", a.ListPatients)
+		r.Get("/patients/{patientID}", a.GetPatient)
+
+		r.Post("/patients/{patientID}/images", a.UploadPatientImage)
+		r.Get("/patients/{patientID}/images", a.ListPatientImages)
+
+		r.Post("/images/{imageID}/analysis", a.RunImageAnalysis)
+		r.Get("/images/{imageID}/analysis", a.GetImageAnalysis)
 	})
 
 	return r
