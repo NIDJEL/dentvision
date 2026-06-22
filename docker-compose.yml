@@ -42,6 +42,7 @@ services:
     environment:
       PORT: ${BACKEND_PORT}
       DATABASE_URL: ${DATABASE_URL}
+      ML_SERVICE_URL: ${ML_SERVICE_URL:-http://ml-service:8000}
     ports:
       - "${BACKEND_PORT}:8080"
     volumes:
@@ -49,6 +50,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      ml-service:
+        condition: service_started
+
+  ml-service:
+    build:
+      context: ./ml-service
+    container_name: dentvision-ml-service
+    restart: unless-stopped
+    ports:
+      - "${ML_SERVICE_PORT:-8001}:8000"
+    volumes:
+      - ./uploads:/app/uploads:ro
 
 volumes:
   postgres_data:

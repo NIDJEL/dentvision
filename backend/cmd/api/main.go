@@ -17,7 +17,7 @@ func main() {
 	}
 	defer db.Close()
 
-	app := server.New(db, cfg.JWTSecret, cfg.UploadsDir)
+	app := server.New(db, cfg.JWTSecret, cfg.UploadsDir, cfg.MLServiceURL)
 
 	if err := app.Start(cfg.Port); err != nil {
 		log.Fatal(err)

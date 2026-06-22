@@ -9,16 +9,22 @@ import (
 )
 
 type App struct {
-	db         *pgxpool.Pool
-	jwtSecret  string
-	uploadsDir string
+	db           *pgxpool.Pool
+	jwtSecret    string
+	uploadsDir   string
+	mlServiceURL string
 }
 
-func New(db *pgxpool.Pool, jwtSecret string, uploadsDir string) *App {
+func New(db *pgxpool.Pool, jwtSecret string, uploadsDir string, mlServiceURL string) *App {
+	if mlServiceURL == "" {
+		mlServiceURL = "http://ml-service:8000"
+	}
+
 	return &App{
-		db:         db,
-		jwtSecret:  jwtSecret,
-		uploadsDir: uploadsDir,
+		db:           db,
+		jwtSecret:    jwtSecret,
+		uploadsDir:   uploadsDir,
+		mlServiceURL: mlServiceURL,
 	}
 }
 
