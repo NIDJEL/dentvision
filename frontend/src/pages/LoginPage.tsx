@@ -21,7 +21,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       const response = await login(email, password);
       onLogin(response.token);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Login failed");
+      setError(err instanceof ApiError ? err.message : "Не удалось войти");
     } finally {
       setSubmitting(false);
     }
@@ -32,15 +32,15 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       <section className="login-panel">
         <div>
           <p className="eyebrow">DentVision</p>
-          <h1>Doctor login</h1>
-          <p className="muted">Sign in to manage patients and analyze dental images.</p>
+          <h1>Вход врача</h1>
+          <p className="muted">Войдите, чтобы вести пациентов и анализировать снимки.</p>
         </div>
 
         <ErrorBanner message={error} />
 
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>
-            Email
+            Электронная почта
             <input
               autoComplete="email"
               type="email"
@@ -51,7 +51,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           </label>
 
           <label>
-            Password
+            Пароль
             <input
               autoComplete="current-password"
               type="password"
@@ -62,7 +62,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           </label>
 
           <button className="primary-button" type="submit" disabled={submitting}>
-            {submitting ? "Signing in..." : "Sign in"}
+            {submitting ? "Входим..." : "Войти"}
           </button>
         </form>
       </section>

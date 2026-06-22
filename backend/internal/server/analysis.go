@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type analysisResultDTO struct {
@@ -34,6 +36,12 @@ type analysisJobDTO struct {
 	Results      []analysisResultDTO `json:"results"`
 }
 
+type analysisStore interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
 func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 	claims, ok := currentUserClaims(r)
 	if !ok {
@@ -47,40 +55,64 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !a.imageBelongsToDoctor(r, imageID, claims.UserID) {
-		writeError(w, http.StatusNotFound, "image not found")
+	ctx := r.Context()
+
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		log.Println("begin analysis tx:", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	defer tx.Rollback(ctx)
 
 	var imagePath string
 
-	err = a.db.QueryRow(
-		r.Context(),
+	err = tx.QueryRow(
+		ctx,
 		`
 		SELECT f.file_path
 		FROM dental_images di
+		JOIN patients p ON p.id = di.patient_id
 		JOIN image_files f ON f.id = di.file_id
-		WHERE di.id = $1
-		LIMIT 1
+		WHERE di.id = $1 AND p.doctor_id = $2
+		FOR UPDATE OF di
 		`,
 		imageID,
+		claims.UserID,
 	).Scan(&imagePath)
-
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeError(w, http.StatusNotFound, "image not found")
 			return
 		}
 
-		log.Println("select image file path:", err)
+		log.Println("lock image for analysis:", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	existingJob, found, err := a.getLatestFinishedAnalysisJob(ctx, tx, imageID)
+	if err != nil {
+		log.Println("get latest finished analysis job:", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if found {
+		if err := tx.Commit(ctx); err != nil {
+			log.Println("commit cached analysis tx:", err)
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, existingJob)
 		return
 	}
 
 	var modelID int64
 
-	err = a.db.QueryRow(
-		r.Context(),
+	err = tx.QueryRow(
+		ctx,
 		`
 		SELECT id
 		FROM analysis_models
@@ -103,8 +135,8 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 
 	var job analysisJobDTO
 
-	err = a.db.QueryRow(
-		r.Context(),
+	err = tx.QueryRow(
+		ctx,
 		`
 		INSERT INTO analysis_jobs (image_id, model_id, status, started_at)
 		VALUES ($1, $2, 'running', NOW())
@@ -135,22 +167,23 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mlResults, err := a.requestMLAnalysis(r.Context(), imagePath)
+	mlResults, err := a.requestMLAnalysis(ctx, imagePath)
 	if err != nil {
 		message := analysisErrorMessage(err)
-		if updateErr := a.markAnalysisJobFailed(r, job.ID, message); updateErr != nil {
+		if updateErr := a.markAnalysisJobFailed(ctx, tx, job.ID, message); updateErr != nil {
 			log.Println("mark analysis job failed:", updateErr)
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			log.Println("commit failed analysis job:", commitErr)
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
 		}
 
 		log.Println("ml analysis:", err)
 		writeError(w, http.StatusBadGateway, "ml service analysis failed: "+message)
-		return
-	}
-
-	tx, err := a.db.Begin(r.Context())
-	if err != nil {
-		log.Println("begin analysis tx:", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -160,7 +193,7 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 		var result analysisResultDTO
 
 		err = tx.QueryRow(
-			r.Context(),
+			ctx,
 			`
 			INSERT INTO analysis_results (job_id, image_id, label, confidence, x, y, width, height)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -188,11 +221,6 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 		)
 
 		if err != nil {
-			_ = tx.Rollback(r.Context())
-			if updateErr := a.markAnalysisJobFailed(r, job.ID, "save analysis results failed"); updateErr != nil {
-				log.Println("mark analysis job failed:", updateErr)
-			}
-
 			log.Println("scan analysis result:", err)
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -202,7 +230,7 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := tx.Exec(
-		r.Context(),
+		ctx,
 		`
 		UPDATE dental_images
 		SET status = 'analyzed'
@@ -210,18 +238,13 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 		`,
 		imageID,
 	); err != nil {
-		_ = tx.Rollback(r.Context())
-		if updateErr := a.markAnalysisJobFailed(r, job.ID, "update image status failed"); updateErr != nil {
-			log.Println("mark analysis job failed:", updateErr)
-		}
-
 		log.Println("update image status:", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	err = tx.QueryRow(
-		r.Context(),
+		ctx,
 		`
 		UPDATE analysis_jobs
 		SET status = 'finished',
@@ -234,17 +257,12 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 	).Scan(&job.Status, &job.FinishedAt)
 
 	if err != nil {
-		_ = tx.Rollback(r.Context())
-		if updateErr := a.markAnalysisJobFailed(r, job.ID, "finish analysis job failed"); updateErr != nil {
-			log.Println("mark analysis job failed:", updateErr)
-		}
-
 		log.Println("finish analysis job:", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		log.Println("commit analysis tx:", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -255,9 +273,102 @@ func (a *App) RunImageAnalysis(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, job)
 }
 
-func (a *App) markAnalysisJobFailed(r *http.Request, jobID int64, message string) error {
-	_, err := a.db.Exec(
-		r.Context(),
+func (a *App) getLatestFinishedAnalysisJob(ctx context.Context, store analysisStore, imageID int64) (analysisJobDTO, bool, error) {
+	var job analysisJobDTO
+
+	err := store.QueryRow(
+		ctx,
+		`
+		SELECT
+			id,
+			image_id,
+			model_id,
+			status,
+			COALESCE(error_message, ''),
+			created_at,
+			COALESCE(finished_at::text, '')
+		FROM analysis_jobs
+		WHERE image_id = $1 AND status = 'finished'
+		ORDER BY finished_at DESC, id DESC
+		LIMIT 1
+		`,
+		imageID,
+	).Scan(
+		&job.ID,
+		&job.ImageID,
+		&job.ModelID,
+		&job.Status,
+		&job.ErrorMessage,
+		&job.CreatedAt,
+		&job.FinishedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return analysisJobDTO{}, false, nil
+		}
+
+		return analysisJobDTO{}, false, err
+	}
+
+	results, err := a.getAnalysisResultsByJob(ctx, store, job.ID)
+	if err != nil {
+		return analysisJobDTO{}, false, err
+	}
+
+	job.Results = results
+
+	return job, true, nil
+}
+
+func (a *App) getAnalysisResultsByJob(ctx context.Context, store analysisStore, jobID int64) ([]analysisResultDTO, error) {
+	rows, err := store.Query(
+		ctx,
+		`
+		SELECT id, job_id, image_id, label, confidence::float8, x, y, width, height, created_at
+		FROM analysis_results
+		WHERE job_id = $1
+		ORDER BY id ASC
+		`,
+		jobID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]analysisResultDTO, 0)
+
+	for rows.Next() {
+		var result analysisResultDTO
+
+		if err := rows.Scan(
+			&result.ID,
+			&result.JobID,
+			&result.ImageID,
+			&result.Label,
+			&result.Confidence,
+			&result.X,
+			&result.Y,
+			&result.Width,
+			&result.Height,
+			&result.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		results = append(results, result)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func (a *App) markAnalysisJobFailed(ctx context.Context, store analysisStore, jobID int64, message string) error {
+	_, err := store.Exec(
+		ctx,
 		`
 		UPDATE analysis_jobs
 		SET status = 'failed',
@@ -290,52 +401,16 @@ func (a *App) GetImageAnalysis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := a.db.Query(
-		r.Context(),
-		`
-		SELECT id, job_id, image_id, label, confidence::float8, x, y, width, height, created_at
-		FROM analysis_results
-		WHERE image_id = $1
-		ORDER BY created_at DESC
-		`,
-		imageID,
-	)
+	job, found, err := a.getLatestFinishedAnalysisJob(r.Context(), a.db, imageID)
 	if err != nil {
 		log.Println("get analysis:", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	defer rows.Close()
 
 	results := make([]analysisResultDTO, 0)
-
-	for rows.Next() {
-		var result analysisResultDTO
-
-		if err := rows.Scan(
-			&result.ID,
-			&result.JobID,
-			&result.ImageID,
-			&result.Label,
-			&result.Confidence,
-			&result.X,
-			&result.Y,
-			&result.Width,
-			&result.Height,
-			&result.CreatedAt,
-		); err != nil {
-			log.Println("scan analysis:", err)
-			writeError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-
-		results = append(results, result)
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Println("rows analysis:", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
-		return
+	if found {
+		results = job.Results
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

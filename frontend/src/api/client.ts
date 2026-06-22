@@ -116,9 +116,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 async function readErrorMessage(response: Response): Promise<string> {
   try {
     const data = (await response.json()) as { error?: string; detail?: string };
-    return data.error || data.detail || `Request failed with status ${response.status}`;
+    return data.error || data.detail || `Запрос завершился с ошибкой ${response.status}`;
   } catch {
-    return `Request failed with status ${response.status}`;
+    return `Запрос завершился с ошибкой ${response.status}`;
   }
 }
 
@@ -146,6 +146,25 @@ export function createPatient(
     method: "POST",
     token,
     body: JSON.stringify(payload),
+  });
+}
+
+export function updatePatient(
+  token: string,
+  patientID: number,
+  payload: CreatePatientPayload,
+): Promise<Patient> {
+  return request<Patient>(`/patients/${patientID}`, {
+    method: "PUT",
+    token,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deletePatient(token: string, patientID: number): Promise<void> {
+  return request<void>(`/patients/${patientID}`, {
+    method: "DELETE",
+    token,
   });
 }
 
@@ -191,6 +210,13 @@ export function getImageAnalysis(
   imageID: number,
 ): Promise<ImageAnalysis> {
   return request<ImageAnalysis>(`/images/${imageID}/analysis`, { token });
+}
+
+export function deleteImage(token: string, imageID: number): Promise<void> {
+  return request<void>(`/images/${imageID}`, {
+    method: "DELETE",
+    token,
+  });
 }
 
 export async function getImageFile(token: string, imageID: number): Promise<Blob> {

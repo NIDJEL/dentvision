@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 type imageDTO struct {
@@ -292,6 +293,80 @@ func (a *App) GetImageFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.ServeFile(w, r, filePath)
+}
+
+func (a *App) DeleteImage(w http.ResponseWriter, r *http.Request) {
+	claims, ok := currentUserClaims(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	imageID, err := strconv.ParseInt(chi.URLParam(r, "imageID"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid image id")
+		return
+	}
+
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		log.Println("begin delete image tx:", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var fileID int64
+	var filePath string
+
+	err = tx.QueryRow(
+		r.Context(),
+		`
+		SELECT f.id, f.file_path
+		FROM dental_images di
+		JOIN patients p ON p.id = di.patient_id
+		JOIN image_files f ON f.id = di.file_id
+		WHERE di.id = $1 AND p.doctor_id = $2
+		LIMIT 1
+		`,
+		imageID,
+		claims.UserID,
+	).Scan(&fileID, &filePath)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeError(w, http.StatusNotFound, "image not found")
+			return
+		}
+
+		log.Println("select image for delete:", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if _, err := tx.Exec(
+		r.Context(),
+		`
+		DELETE FROM image_files
+		WHERE id = $1
+		`,
+		fileID,
+	); err != nil {
+		log.Println("delete image file row:", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		log.Println("commit delete image tx:", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+		log.Println("remove image file:", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *App) patientBelongsToDoctor(r *http.Request, patientID int64, doctorID int64) bool {

@@ -24,8 +24,11 @@ type loginResponse struct {
 }
 
 type patientResponse struct {
-	ID       int64  `json:"id"`
-	FullName string `json:"full_name"`
+	ID        int64  `json:"id"`
+	FullName  string `json:"full_name"`
+	BirthDate string `json:"birth_date"`
+	Phone     string `json:"phone"`
+	Comment   string `json:"comment"`
 }
 
 type imageResponse struct {
@@ -60,11 +63,14 @@ type getAnalysisResponse struct {
 }
 
 func TestDoctorMainFlow(t *testing.T) {
+	mlCalls := 0
 	mlService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/analyze" {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+
+		mlCalls++
 
 		var req struct {
 			ImagePath string `json:"image_path"`
@@ -175,6 +181,42 @@ func TestDoctorMainFlow(t *testing.T) {
 	if got := savedAnalysis.Results[0].Label; got != "mock_finding" {
 		t.Fatalf("expected saved ML label mock_finding, got %q", got)
 	}
+
+	var repeatedAnalysis analysisResponse
+
+	status, body = testutil.DoJSON(
+		t,
+		client,
+		http.MethodPost,
+		fmt.Sprintf("%s/images/%d/analysis", ts.URL, image.ID),
+		login.Token,
+		nil,
+		&repeatedAnalysis,
+	)
+	testutil.RequireStatus(t, status, http.StatusOK, body)
+
+	if len(repeatedAnalysis.Results) != 1 {
+		t.Fatalf("expected repeated analysis to return one cached result, got %d", len(repeatedAnalysis.Results))
+	}
+
+	if mlCalls != 1 {
+		t.Fatalf("expected ML service to be called once, got %d calls", mlCalls)
+	}
+
+	status, body = testutil.DoJSON(
+		t,
+		client,
+		http.MethodGet,
+		fmt.Sprintf("%s/images/%d/analysis", ts.URL, image.ID),
+		login.Token,
+		nil,
+		&savedAnalysis,
+	)
+	testutil.RequireStatus(t, status, http.StatusOK, body)
+
+	if len(savedAnalysis.Results) != 1 {
+		t.Fatalf("expected saved results not to duplicate, got %d", len(savedAnalysis.Results))
+	}
 }
 
 func TestRunImageAnalysisMarksJobFailedWhenMLServiceFails(t *testing.T) {
@@ -262,6 +304,94 @@ func TestRunImageAnalysisMarksJobFailedWhenMLServiceFails(t *testing.T) {
 	if resultCount != 0 {
 		t.Fatalf("expected no saved analysis results, got %d", resultCount)
 	}
+}
+
+func TestPatientAndImageManagementFlow(t *testing.T) {
+	_, ts, client := startBackendWithML(t, "http://127.0.0.1:1")
+	login := loginDoctor(t, client, ts.URL)
+	patient := createTestPatient(t, client, ts.URL, login.Token)
+
+	var updatedPatient patientResponse
+
+	status, body := testutil.DoJSON(
+		t,
+		client,
+		http.MethodPut,
+		fmt.Sprintf("%s/patients/%d", ts.URL, patient.ID),
+		login.Token,
+		map[string]string{
+			"full_name":  "Petr Petrov",
+			"birth_date": "1988-03-21",
+			"phone":      "+79991112233",
+			"comment":    "Updated by integration test",
+		},
+		&updatedPatient,
+	)
+	testutil.RequireStatus(t, status, http.StatusOK, body)
+
+	if updatedPatient.FullName != "Petr Petrov" {
+		t.Fatalf("expected updated patient name, got %q", updatedPatient.FullName)
+	}
+
+	if updatedPatient.Phone != "+79991112233" {
+		t.Fatalf("expected updated patient phone, got %q", updatedPatient.Phone)
+	}
+
+	image := uploadTestImage(t, client, ts.URL, login.Token, patient.ID)
+	assertImageFileIsServed(t, client, ts.URL, login.Token, image.ID)
+
+	status, body = testutil.DoJSON(
+		t,
+		client,
+		http.MethodDelete,
+		fmt.Sprintf("%s/images/%d", ts.URL, image.ID),
+		login.Token,
+		nil,
+		nil,
+	)
+	testutil.RequireStatus(t, status, http.StatusNoContent, body)
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		fmt.Sprintf("%s/images/%d/file", ts.URL, image.ID),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("new deleted image file request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+login.Token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("get deleted image file: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected deleted image file status 404, got %d", resp.StatusCode)
+	}
+
+	status, body = testutil.DoJSON(
+		t,
+		client,
+		http.MethodDelete,
+		fmt.Sprintf("%s/patients/%d", ts.URL, patient.ID),
+		login.Token,
+		nil,
+		nil,
+	)
+	testutil.RequireStatus(t, status, http.StatusNoContent, body)
+
+	status, body = testutil.DoJSON(
+		t,
+		client,
+		http.MethodGet,
+		fmt.Sprintf("%s/patients/%d", ts.URL, patient.ID),
+		login.Token,
+		nil,
+		nil,
+	)
+	testutil.RequireStatus(t, status, http.StatusNotFound, body)
 }
 
 func startBackendWithML(t *testing.T, mlServiceURL string) (*pgxpool.Pool, *httptest.Server, *http.Client) {

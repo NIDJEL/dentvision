@@ -58,10 +58,16 @@ services:
       context: ./ml-service
     container_name: dentvision-ml-service
     restart: unless-stopped
+    environment:
+      MODEL_PATH: ${MODEL_PATH:-/app/models/dentex_yolov8n.pt}
+      MODEL_CONFIDENCE: ${MODEL_CONFIDENCE:-0.25}
+      MODEL_IMAGE_SIZE: ${MODEL_IMAGE_SIZE:-640}
+      ML_DEMO_MODE: ${ML_DEMO_MODE:-false}
     ports:
       - "${ML_SERVICE_PORT:-8001}:8000"
     volumes:
       - ./uploads:/app/uploads:ro
+      - ./ml-service/models:/app/models:ro
 
   frontend:
     build:

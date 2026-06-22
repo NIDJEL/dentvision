@@ -27,7 +27,7 @@ export function AppShell({
         <div className="topbar-user">
           {user ? <span>{user.full_name || user.email}</span> : null}
           <button className="secondary-button" type="button" onClick={onLogout}>
-            Logout
+            Выйти
           </button>
         </div>
       </header>

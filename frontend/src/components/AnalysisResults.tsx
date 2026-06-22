@@ -2,11 +2,15 @@ import type { AnalysisResult } from "../api/client";
 
 type AnalysisResultsProps = {
   results: AnalysisResult[];
+  emptyMessage?: string;
 };
 
-export function AnalysisResults({ results }: AnalysisResultsProps) {
+export function AnalysisResults({
+  results,
+  emptyMessage = "Для этого снимка пока нет сохраненных результатов. Сначала запустите анализ.",
+}: AnalysisResultsProps) {
   if (results.length === 0) {
-    return <p className="muted">No saved analysis results yet.</p>;
+    return <p className="muted">{emptyMessage}</p>;
   }
 
   return (
@@ -14,12 +18,12 @@ export function AnalysisResults({ results }: AnalysisResultsProps) {
       <table className="results-table">
         <thead>
           <tr>
-            <th>Label</th>
-            <th>Confidence</th>
+            <th>Метка</th>
+            <th>Уверенность</th>
             <th>X</th>
             <th>Y</th>
-            <th>Width</th>
-            <th>Height</th>
+            <th>Ширина</th>
+            <th>Высота</th>
           </tr>
         </thead>
         <tbody>

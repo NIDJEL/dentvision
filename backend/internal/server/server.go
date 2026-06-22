@@ -46,11 +46,14 @@ func (a *App) Routes() http.Handler {
 		r.Post("/patients", a.CreatePatient)
 		r.Get("/patients", a.ListPatients)
 		r.Get("/patients/{patientID}", a.GetPatient)
+		r.Put("/patients/{patientID}", a.UpdatePatient)
+		r.Delete("/patients/{patientID}", a.DeletePatient)
 
 		r.Post("/patients/{patientID}/images", a.UploadPatientImage)
 		r.Get("/patients/{patientID}/images", a.ListPatientImages)
 
 		r.Get("/images/{imageID}/file", a.GetImageFile)
+		r.Delete("/images/{imageID}", a.DeleteImage)
 		r.Post("/images/{imageID}/analysis", a.RunImageAnalysis)
 		r.Get("/images/{imageID}/analysis", a.GetImageAnalysis)
 	})
@@ -62,7 +65,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

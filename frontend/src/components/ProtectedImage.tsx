@@ -39,11 +39,11 @@ export function ProtectedImage({ token, imageID, alt }: ProtectedImageProps) {
   }, [imageID, token]);
 
   if (failed) {
-    return <div className="image-placeholder">Image preview unavailable</div>;
+    return <div className="image-placeholder">Превью недоступно</div>;
   }
 
   if (!src) {
-    return <div className="image-placeholder">Loading preview...</div>;
+    return <div className="image-placeholder">Загружаем превью...</div>;
   }
 
   return <img className="image-preview" src={src} alt={alt} />;

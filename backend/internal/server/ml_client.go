@@ -79,10 +79,6 @@ func (a *App) requestMLAnalysis(ctx context.Context, imagePath string) ([]mlAnal
 }
 
 func validateMLResults(results []mlAnalysisResult) error {
-	if len(results) == 0 {
-		return fmt.Errorf("ml service returned no results")
-	}
-
 	for index, result := range results {
 		if strings.TrimSpace(result.Label) == "" {
 			return fmt.Errorf("ml service returned invalid result %d: label is required", index)

@@ -101,7 +101,7 @@ export function App() {
   );
 
   if (!authChecked) {
-    return <div className="app-loading">Loading DentVision...</div>;
+    return <div className="app-loading">Загружаем DentVision...</div>;
   }
 
   if (!token || route.name === "login") {
